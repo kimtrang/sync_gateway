@@ -81,6 +81,10 @@ func TestDocLifecycle(t *testing.T) {
 	var rt RestTester
 	defer rt.Close()
 
+	rt.DatabaseConfig = &DbConfig{
+		Name: "db",
+	}
+
 	revid := rt.createDoc(t, "doc")
 	assert.Equals(t, revid, "1-45ca73d819d5b1c9b8eea95290e79004")
 
@@ -2237,7 +2241,7 @@ func TestRoleAccessChanges(t *testing.T) {
 	json.Unmarshal(response.Body.Bytes(), &changes)
 	assert.Equals(t, len(changes.Results), 2)
 	log.Printf("changes: %+v", changes.Results)
-	assert.Equals(t, changes.Last_Seq, "6:2")  // Test sporadically failing here.  See https://github.com/couchbase/sync_gateway/issues/3095
+	assert.Equals(t, changes.Last_Seq, "6:2") // Test sporadically failing here.  See https://github.com/couchbase/sync_gateway/issues/3095
 	assert.Equals(t, changes.Results[0].ID, "b1")
 	assert.Equals(t, changes.Results[1].ID, "g1")
 
