@@ -8,9 +8,73 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"github.com/couchbase/go-blip"
+	"net/url"
+	"time"
+	"github.com/couchbase/sync_gateway/base"
 )
 
-func TestBlipEndpoint(t *testing.T) {
+func TestBlipEndpointHttpTest(t *testing.T) {
+
+	var rt RestTester
+	defer rt.Close()
+
+	publicHandler := rt.TestPublicHandler()
+
+	srv := httptest.NewServer(publicHandler)
+
+
+	//go func() {
+	//	log.Printf("starting server: %+v", srv)
+	//	srv.Start()
+	//	log.Printf("server unblocked (unexpected): %+v", srv)
+	//}()
+
+	time.Sleep(time.Second * 1)
+
+	destUrl := fmt.Sprintf("%s/db/_blipsync", srv.URL)
+
+	u, err := url.Parse(destUrl)
+	assertNoError(t, err, "Unexpected error")
+
+	u.Scheme = "ws"
+
+	log.Printf("Connecting to destUrl: %s", u.String())
+
+	// TODO: blip is not sending the Sec-WS-Protocols header, and so it
+	// TODO: blows up here:
+	// TODO: func (context *Context) WebSocketHandshake() WSHandshake {
+	//       context.log("Error: Client doesn't support WS protocol %s, only %s", WebSocketProtocolName, protocolHeader)
+
+
+	blipContext := blip.NewContext()
+	blipContext.Logger = func(fmt string, params ...interface{}) {
+		base.LogTo("BLIP", fmt, params...)
+	}
+	blipContext.LogMessages = true
+	blipContext.LogFrames = true
+	origin := "http://localhost" // TODO: what should be used here?
+	sender, err := blipContext.Dial(u.String(), origin)
+	if err != nil {
+		panic("Error opening WebSocket: " + err.Error())
+	}
+
+	log.Printf("sender: %v", sender)
+
+
+
+}
+
+
+
+
+
+
+
+
+
+// Fails with error since ResponseRecorder does not implment Hijackable interface
+func TestBlipEndpointResponseRecorder(t *testing.T) {
 
 	var rt RestTester
 	defer rt.Close()
