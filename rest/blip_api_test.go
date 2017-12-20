@@ -1,23 +1,32 @@
 package rest
 
 import (
-	"log"
-	"net/http/httptest"
-	"testing"
-
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"sync"
+	"testing"
 
 	"github.com/couchbase/go-blip"
 	"github.com/couchbase/sync_gateway/base"
 	"github.com/couchbaselabs/go.assert"
-	"time"
-	"encoding/json"
 )
 
-func TestBlipEndpointHttpTest(t *testing.T) {
+// This test performs the following steps against the Sync Gateway passive blip replicator:
+//
+// - Setup
+//   - Create an httptest server listening on a port that wraps the Sync Gateway Admin Handler
+//   - Make a BLIP/Websocket client connection to Sync Gateway
+// - Test
+//   - Verify Sync Gateway will accept the doc revision that is about to be sent
+//   - Send the doc revision in a rev request
+//   - Call changes endpoint and verify that it knows about the revision just sent
+//   - Call subChanges api and make sure we get expected changes back
+func TestBlipPushRevisionInspectChanges(t *testing.T) {
 
 	var rt RestTester
 	defer rt.Close()
@@ -53,23 +62,7 @@ func TestBlipEndpointHttpTest(t *testing.T) {
 	sender, err := blipContext.Dial(u.String(), origin)
 	assertNoError(t, err, "Websocket connection error")
 
-
-	// When this test sends subChanges, Sync Gateway will send a changes request that must be handled
-	blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
-		log.Printf("got changes message: %+v", request)
-		body, err := request.Body()
-		log.Printf("changes body: %v, err: %v", string(body), err)
-	}
-
-	// When this test sends changes, Sync Gateway will send rev
-	blipContext.HandlerForProfile["rev"] = func(request *blip.Message) {
-		log.Printf("got rev message: %+v", request)
-		body, err := request.Body()
-		log.Printf("rev body: %v, err: %v", string(body), err)
-	}
-
-
-	// Verify the server will accept the change
+	// Verify Sync Gateway will accept the doc revision that is about to be sent
 	var changeList [][]interface{}
 	changesRequest := blip.NewRequest()
 	changesRequest.SetProfile("changes")
@@ -83,11 +76,11 @@ func TestBlipEndpointHttpTest(t *testing.T) {
 	err = json.Unmarshal(body, &changeList)
 	assertNoError(t, err, "Error unmarshalling response body")
 	log.Printf("changes response body: %s", body)
-	assert.True(t, len(changeList) == 1)  // Should be 1 row, corresponding to the single doc that was queried in changes
+	assert.True(t, len(changeList) == 1) // Should be 1 row, corresponding to the single doc that was queried in changes
 	changeRow := changeList[0]
-	assert.True(t, len(changeRow) == 0)  // Should be empty, meaning the server is saying it doesn't have the revision yet
+	assert.True(t, len(changeRow) == 0) // Should be empty, meaning the server is saying it doesn't have the revision yet
 
-	// Send the change in a rev request
+	// Send the doc revision in a rev request
 	revRequest := blip.NewRequest()
 	revRequest.SetProfile("rev")
 	revRequest.Properties["id"] = "foo"
@@ -103,21 +96,59 @@ func TestBlipEndpointHttpTest(t *testing.T) {
 	assertNoError(t, err, "Error unmarshalling response body")
 	log.Printf("rev response body: %s", body)
 
+	// Call changes with a hypothetical new revision, assert that it returns last pushed revision
+	var changeList2 [][]interface{}
+	changesRequest2 := blip.NewRequest()
+	changesRequest2.SetProfile("changes")
+	changesRequest2.SetBody([]byte(`[["2", "foo", "2-xyz", false]]`)) // [sequence, docID, revID]
+	sent2 := sender.Send(changesRequest2)
+	assert.True(t, sent2)
+	changesResponse2 := changesRequest2.Response()
+	assert.Equals(t, changesResponse2.SerialNumber(), changesRequest2.SerialNumber())
+	body2, err := changesResponse2.Body()
+	assertNoError(t, err, "Error reading changes response body")
+	log.Printf("changes2 response body: %s", body2)
+	err = json.Unmarshal(body2, &changeList2)
+	assertNoError(t, err, "Error unmarshalling response body")
+	assert.True(t, len(changeList2) == 1) // Should be 1 row, corresponding to the single doc that was queried in changes
+	changeRow2 := changeList2[0]
+	assert.True(t, len(changeRow2) == 1) // Should have 1 item in row, which is the rev id of the previous revision pushed
+	assert.Equals(t, changeRow2[0], "1-abc")
 
-	//// get changes, should be empty
-	//subChangesRequest := blip.NewRequest()
-	//subChangesRequest.SetProfile("subChanges")
-	//sent = sender.Send(subChangesRequest)
-	//assert.True(t, sent)
-	//
-	//log.Printf("sender: %v", sender)
-	//
-	time.Sleep(time.Second * 5)
+	// Call subChanges api and make sure we get expected changes back
+	receviedChangesRequestWg := sync.WaitGroup{}
+	// When this test sends subChanges, Sync Gateway will send a changes request that must be handled
+	blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
+		log.Printf("got changes message: %+v", request)
+		body, err := request.Body()
+		log.Printf("changes body: %v, err: %v", string(body), err)
+		// Expected changes body: [[1,"foo","1-abc"]]
+		changeListReceived := [][]interface{}{}
+		err = json.Unmarshal(body, &changeListReceived)
+		assertNoError(t, err, "Error unmarshalling changes recevied")
+		assert.True(t, len(changeListReceived) == 1)
+		change := changeListReceived[0] // [1,"foo","1-abc"]
+		assert.True(t, len(change) == 3)
+		assert.Equals(t, change[0].(float64), float64(1)) // Original sequence sent in pushed rev
+		assert.Equals(t, change[1], "foo")                // Doc id of pushed rev
+		assert.Equals(t, change[2], "1-abc")              // Rev id of pushed rev
+		receviedChangesRequestWg.Done()
+	}
+	subChangesRequest := blip.NewRequest()
+	subChangesRequest.SetProfile("subChanges")
+	sent = sender.Send(subChangesRequest)
+	assert.True(t, sent)
+	receviedChangesRequestWg.Add(1)
+	subChangesResponse := subChangesRequest.Response()
+	assert.Equals(t, subChangesResponse.SerialNumber(), subChangesRequest.SerialNumber())
+
+	// Wait until we got the expected incoming changes request
+	receviedChangesRequestWg.Wait()
 
 }
 
 // Fails with error since ResponseRecorder does not implment Hijackable interface
-func TestBlipEndpointResponseRecorder(t *testing.T) {
+func DisabledTestBlipEndpointResponseRecorder(t *testing.T) {
 
 	var rt RestTester
 	defer rt.Close()
@@ -138,45 +169,5 @@ func TestBlipEndpointResponseRecorder(t *testing.T) {
 	rt.TestPublicHandler().ServeHTTP(response, request)
 
 	response.DumpBody()
-
-	// blipSyncHandler := makeHandler(serverContext, adminPrivs, (*handler).handleBLIPSync)
-
-	// publicHandler := CreatePublicHandler(serverContext)
-
-	// srv := httptest.NewServer(publicHandler)
-
-	// destUrl := fmt.Sprintf("%s/todo/_blipsync", srv.URL)
-	// destUrl := fmt.Sprintf("%s", srv.URL)
-
-	// u, _ := url.Parse(destUrl)
-
-	// u.Scheme = "ws"
-
-	//context := blip.NewContext()
-	//context.LogMessages = true
-	//context.LogFrames = true
-	//origin := "http://localhost" // TODO: what should be used here?
-	//sender, err := context.Dial(u.String(), origin)
-	//if err != nil {
-	//	panic("Error opening WebSocket: " + err.Error())
-	//}
-
-	//log.Printf("sender: %v", sender)
-
-	//request := blip.NewRequest()
-	//request.SetProfile("/db/_blipsync")
-	//request.Properties["Content-Type"] = "application/octet-stream"
-	//body := make([]byte, rand.Intn(100))
-	//for i := 0; i < len(body); i++ {
-	//	body[i] = byte(i % 256)
-	//}
-	//request.SetBody(body)
-	//sender.Send(request)
-	//
-	//log.Printf("sent request: %v", request)
-
-	//response := rt.SendRequest("GET", "/db/doc", `{"prop":true}`)
-
-	// TODO: send websocket upgrade request
 
 }
