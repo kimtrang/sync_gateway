@@ -8,10 +8,13 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
-	"github.com/couchbase/go-blip"
 	"net/url"
-	"time"
+
+	"github.com/couchbase/go-blip"
 	"github.com/couchbase/sync_gateway/base"
+	"github.com/couchbaselabs/go.assert"
+	"time"
+	"encoding/json"
 )
 
 func TestBlipEndpointHttpTest(t *testing.T) {
@@ -19,34 +22,27 @@ func TestBlipEndpointHttpTest(t *testing.T) {
 	var rt RestTester
 	defer rt.Close()
 
-	publicHandler := rt.TestPublicHandler()
+	base.EnableLogKey("HTTP")
+	base.EnableLogKey("HTTP+")
+	base.EnableLogKey("BLIP")
+	base.EnableLogKey("BLIP+")
+	base.EnableLogKey("Sync")
+	base.EnableLogKey("Sync+")
 
-	srv := httptest.NewServer(publicHandler)
+	// Create an admin handler
+	adminHandler := rt.TestAdminHandler()
 
+	// Create a test server and close it when the test is complete
+	srv := httptest.NewServer(adminHandler)
+	defer srv.Close()
 
-	//go func() {
-	//	log.Printf("starting server: %+v", srv)
-	//	srv.Start()
-	//	log.Printf("server unblocked (unexpected): %+v", srv)
-	//}()
-
-	time.Sleep(time.Second * 1)
-
+	// Construct URL to connect to blipsync target endpoint
 	destUrl := fmt.Sprintf("%s/db/_blipsync", srv.URL)
-
 	u, err := url.Parse(destUrl)
-	assertNoError(t, err, "Unexpected error")
-
+	assertNoError(t, err, "Error parsing desturl")
 	u.Scheme = "ws"
 
-	log.Printf("Connecting to destUrl: %s", u.String())
-
-	// TODO: blip is not sending the Sec-WS-Protocols header, and so it
-	// TODO: blows up here:
-	// TODO: func (context *Context) WebSocketHandshake() WSHandshake {
-	//       context.log("Error: Client doesn't support WS protocol %s, only %s", WebSocketProtocolName, protocolHeader)
-
-
+	// Make BLIP/Websocket connection
 	blipContext := blip.NewContext()
 	blipContext.Logger = func(fmt string, params ...interface{}) {
 		base.LogTo("BLIP", fmt, params...)
@@ -55,23 +51,70 @@ func TestBlipEndpointHttpTest(t *testing.T) {
 	blipContext.LogFrames = true
 	origin := "http://localhost" // TODO: what should be used here?
 	sender, err := blipContext.Dial(u.String(), origin)
-	if err != nil {
-		panic("Error opening WebSocket: " + err.Error())
+	assertNoError(t, err, "Websocket connection error")
+
+
+	// When this test sends subChanges, Sync Gateway will send a changes request that must be handled
+	blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
+		log.Printf("got changes message: %+v", request)
+		body, err := request.Body()
+		log.Printf("changes body: %v, err: %v", string(body), err)
 	}
 
-	log.Printf("sender: %v", sender)
+	// When this test sends changes, Sync Gateway will send rev
+	blipContext.HandlerForProfile["rev"] = func(request *blip.Message) {
+		log.Printf("got rev message: %+v", request)
+		body, err := request.Body()
+		log.Printf("rev body: %v, err: %v", string(body), err)
+	}
 
 
+	// Verify the server will accept the change
+	var changeList [][]interface{}
+	changesRequest := blip.NewRequest()
+	changesRequest.SetProfile("changes")
+	changesRequest.SetBody([]byte(`[["1", "foo", "1-abc", false]]`)) // [sequence, docID, revID]
+	sent := sender.Send(changesRequest)
+	assert.True(t, sent)
+	changesResponse := changesRequest.Response()
+	assert.Equals(t, changesResponse.SerialNumber(), changesRequest.SerialNumber())
+	body, err := changesResponse.Body()
+	assertNoError(t, err, "Error reading changes response body")
+	err = json.Unmarshal(body, &changeList)
+	assertNoError(t, err, "Error unmarshalling response body")
+	log.Printf("changes response body: %s", body)
+	assert.True(t, len(changeList) == 1)  // Should be 1 row, corresponding to the single doc that was queried in changes
+	changeRow := changeList[0]
+	assert.True(t, len(changeRow) == 0)  // Should be empty, meaning the server is saying it doesn't have the revision yet
+
+	// Send the change in a rev request
+	revRequest := blip.NewRequest()
+	revRequest.SetProfile("rev")
+	revRequest.Properties["id"] = "foo"
+	revRequest.Properties["rev"] = "1-abc"
+	revRequest.Properties["deleted"] = "false"
+	revRequest.Properties["sequence"] = "1"
+	revRequest.SetBody([]byte(`{"key": "val"}`))
+	sent = sender.Send(revRequest)
+	assert.True(t, sent)
+	revResponse := revRequest.Response()
+	assert.Equals(t, revResponse.SerialNumber(), revRequest.SerialNumber())
+	body, err = revResponse.Body()
+	assertNoError(t, err, "Error unmarshalling response body")
+	log.Printf("rev response body: %s", body)
+
+
+	//// get changes, should be empty
+	//subChangesRequest := blip.NewRequest()
+	//subChangesRequest.SetProfile("subChanges")
+	//sent = sender.Send(subChangesRequest)
+	//assert.True(t, sent)
+	//
+	//log.Printf("sender: %v", sender)
+	//
+	time.Sleep(time.Second * 5)
 
 }
-
-
-
-
-
-
-
-
 
 // Fails with error since ResponseRecorder does not implment Hijackable interface
 func TestBlipEndpointResponseRecorder(t *testing.T) {
