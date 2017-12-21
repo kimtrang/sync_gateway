@@ -16,6 +16,34 @@ import (
 	"github.com/couchbaselabs/go.assert"
 )
 
+// What's missing:
+// - Getting and setting a checkpoint
+// - Getting and setting attachments
+// - Continuous changes feed
+// - No-conflicts mode replication (proposeChanges)
+// - Unsolicited rev request
+// - Connect to public port with authentication
+
+// Make sure it's not possible to have two outstanding subChanges w/ continuous=true.
+func TestConcurrentChangesSubscriptions(t *testing.T) {
+
+
+}
+
+// Start subChanges w/ continuous=true, batchsize=20
+// Make several updates
+// Wait until we get the expected updates
+func TestContinousChangesSubscription(t *testing.T) {
+
+
+}
+
+func TestMultiChannelContinousChangesSubscription(t *testing.T) {
+
+
+}
+
+
 // This test performs the following steps against the Sync Gateway passive blip replicator:
 //
 // - Setup
@@ -65,7 +93,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	// Verify Sync Gateway will accept the doc revision that is about to be sent
 	var changeList [][]interface{}
 	changesRequest := blip.NewRequest()
-	changesRequest.SetProfile("changes")
+	changesRequest.SetProfile("changes")  // TODO: make a constant for "changes" and use it everywhere
 	changesRequest.SetBody([]byte(`[["1", "foo", "1-abc", false]]`)) // [sequence, docID, revID]
 	sent := sender.Send(changesRequest)
 	assert.True(t, sent)
@@ -133,9 +161,14 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 		assert.Equals(t, change[1], "foo")                // Doc id of pushed rev
 		assert.Equals(t, change[2], "1-abc")              // Rev id of pushed rev
 		receviedChangesRequestWg.Done()
+
+		// TODO: send a reply saying we don't need any changes
+
 	}
 	subChangesRequest := blip.NewRequest()
 	subChangesRequest.SetProfile("subChanges")
+	subChangesRequest.Properties["continuous"] = "true"
+
 	sent = sender.Send(subChangesRequest)
 	assert.True(t, sent)
 	receviedChangesRequestWg.Add(1)
@@ -144,6 +177,9 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 
 	// Wait until we got the expected incoming changes request
 	receviedChangesRequestWg.Wait()
+
+
+	// changes := getChangesSince()
 
 }
 
