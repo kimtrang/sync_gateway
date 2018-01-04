@@ -12,6 +12,7 @@ import (
 	"github.com/couchbase/go-blip"
 	"github.com/couchbase/sync_gateway/base"
 	"github.com/couchbaselabs/go.assert"
+	"time"
 )
 
 // What's missing:
@@ -33,7 +34,7 @@ import (
 //   - Call changes endpoint and verify that it knows about the revision just sent
 //   - Call subChanges api and make sure we get expected changes back
 func TestBlipPushRevisionInspectChanges(t *testing.T) {
-
+	
 	var rt RestTester
 	defer rt.Close()
 
@@ -142,7 +143,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	// Send subChanges to subscribe to changes, which will cause the "changes" profile handler above to be called back
 	subChangesRequest := blip.NewRequest()
 	subChangesRequest.SetProfile("subChanges")
-	subChangesRequest.Properties["continuous"] = "true"
+	subChangesRequest.Properties["continuous"] = "false"
 	sent = sender.Send(subChangesRequest)
 	assert.True(t, sent)
 	receviedChangesRequestWg.Add(1)
@@ -154,10 +155,33 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 
 }
 
+
 // Start subChanges w/ continuous=true, batchsize=20
 // Make several updates
 // Wait until we get the expected updates
 func TestContinousChangesSubscription(t *testing.T) {
+
+	bt := CreateBlipTester(t)
+	defer bt.rt.Close()
+
+	// When this test sends subChanges, Sync Gateway will send a changes request that must be handled
+	bt.blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
+
+		log.Printf("got changes message: %+v", request)
+
+	}
+
+	// Send subChanges to subscribe to changes, which will cause the "changes" profile handler above to be called back
+	subChangesRequest := blip.NewRequest()
+	subChangesRequest.SetProfile("subChanges")
+	subChangesRequest.Properties["continuous"] = "true"
+	sent := bt.sender.Send(subChangesRequest)
+	assert.True(t, sent)
+	subChangesResponse := subChangesRequest.Response()
+	assert.Equals(t, subChangesResponse.SerialNumber(), subChangesRequest.SerialNumber())
+
+	time.Sleep(time.Second * 5)
+
 
 }
 
@@ -170,13 +194,3 @@ func TestMultiChannelContinousChangesSubscription(t *testing.T) {
 
 }
 
-func EnableBlipSyncLogs() {
-
-	base.EnableLogKey("HTTP")
-	base.EnableLogKey("HTTP+")
-	base.EnableLogKey("BLIP")
-	base.EnableLogKey("BLIP+")
-	base.EnableLogKey("Sync")
-	base.EnableLogKey("Sync+")
-
-}
