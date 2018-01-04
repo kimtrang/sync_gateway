@@ -2,17 +2,13 @@ package rest
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
-	"net/http/httptest"
-	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/couchbase/go-blip"
-	"github.com/couchbase/sync_gateway/base"
 	"github.com/couchbaselabs/go.assert"
-	"time"
 )
 
 // What's missing:
@@ -34,42 +30,16 @@ import (
 //   - Call changes endpoint and verify that it knows about the revision just sent
 //   - Call subChanges api and make sure we get expected changes back
 func TestBlipPushRevisionInspectChanges(t *testing.T) {
-	
-	var rt RestTester
-	defer rt.Close()
 
-	EnableBlipSyncLogs()
-
-	// Create an admin handler
-	adminHandler := rt.TestAdminHandler()
-
-	// Create a test server and close it when the test is complete
-	srv := httptest.NewServer(adminHandler)
-	defer srv.Close()
-
-	// Construct URL to connect to blipsync target endpoint
-	destUrl := fmt.Sprintf("%s/db/_blipsync", srv.URL)
-	u, err := url.Parse(destUrl)
-	assertNoError(t, err, "Error parsing desturl")
-	u.Scheme = "ws"
-
-	// Make BLIP/Websocket connection
-	blipContext := blip.NewContext()
-	blipContext.Logger = func(fmt string, params ...interface{}) {
-		base.LogTo("BLIP", fmt, params...)
-	}
-	blipContext.LogMessages = true
-	blipContext.LogFrames = true
-	origin := "http://localhost" // TODO: what should be used here?
-	sender, err := blipContext.Dial(u.String(), origin)
-	assertNoError(t, err, "Websocket connection error")
+	bt := CreateBlipTester(t)
+	defer bt.Close()
 
 	// Verify Sync Gateway will accept the doc revision that is about to be sent
 	var changeList [][]interface{}
 	changesRequest := blip.NewRequest()
 	changesRequest.SetProfile("changes")                             // TODO: make a constant for "changes" and use it everywhere
 	changesRequest.SetBody([]byte(`[["1", "foo", "1-abc", false]]`)) // [sequence, docID, revID]
-	sent := sender.Send(changesRequest)
+	sent := bt.sender.Send(changesRequest)
 	assert.True(t, sent)
 	changesResponse := changesRequest.Response()
 	assert.Equals(t, changesResponse.SerialNumber(), changesRequest.SerialNumber())
@@ -90,7 +60,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	revRequest.Properties["deleted"] = "false"
 	revRequest.Properties["sequence"] = "1"
 	revRequest.SetBody([]byte(`{"key": "val"}`))
-	sent = sender.Send(revRequest)
+	sent = bt.sender.Send(revRequest)
 	assert.True(t, sent)
 	revResponse := revRequest.Response()
 	assert.Equals(t, revResponse.SerialNumber(), revRequest.SerialNumber())
@@ -103,7 +73,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	changesRequest2 := blip.NewRequest()
 	changesRequest2.SetProfile("changes")
 	changesRequest2.SetBody([]byte(`[["2", "foo", "2-xyz", false]]`)) // [sequence, docID, revID]
-	sent2 := sender.Send(changesRequest2)
+	sent2 := bt.sender.Send(changesRequest2)
 	assert.True(t, sent2)
 	changesResponse2 := changesRequest2.Response()
 	assert.Equals(t, changesResponse2.SerialNumber(), changesRequest2.SerialNumber())
@@ -121,7 +91,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	receviedChangesRequestWg := sync.WaitGroup{}
 
 	// When this test sends subChanges, Sync Gateway will send a changes request that must be handled
-	blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
+	bt.blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
 
 		log.Printf("got changes message: %+v", request)
 		body, err := request.Body()
@@ -144,7 +114,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	subChangesRequest := blip.NewRequest()
 	subChangesRequest.SetProfile("subChanges")
 	subChangesRequest.Properties["continuous"] = "false"
-	sent = sender.Send(subChangesRequest)
+	sent = bt.sender.Send(subChangesRequest)
 	assert.True(t, sent)
 	receviedChangesRequestWg.Add(1)
 	subChangesResponse := subChangesRequest.Response()
@@ -155,14 +125,13 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 
 }
 
-
 // Start subChanges w/ continuous=true, batchsize=20
 // Make several updates
 // Wait until we get the expected updates
 func TestContinousChangesSubscription(t *testing.T) {
 
 	bt := CreateBlipTester(t)
-	defer bt.rt.Close()
+	defer bt.Close()
 
 	// When this test sends subChanges, Sync Gateway will send a changes request that must be handled
 	bt.blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
@@ -182,7 +151,6 @@ func TestContinousChangesSubscription(t *testing.T) {
 
 	time.Sleep(time.Second * 5)
 
-
 }
 
 // Make sure it's not possible to have two outstanding subChanges w/ continuous=true.
@@ -193,4 +161,3 @@ func TestConcurrentChangesSubscriptions(t *testing.T) {
 func TestMultiChannelContinousChangesSubscription(t *testing.T) {
 
 }
-

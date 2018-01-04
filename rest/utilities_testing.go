@@ -483,6 +483,10 @@ type BlipTester struct {
 }
 
 
+func (bt BlipTester) Close() {
+	bt.rt.Close()
+}
+
 func CreateBlipTester(t *testing.T) (bt BlipTester) {
 
 	EnableBlipSyncLogs()
