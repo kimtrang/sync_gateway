@@ -1,11 +1,9 @@
 package rest
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sync"
@@ -17,32 +15,12 @@ import (
 )
 
 // What's missing:
+// - Continuous changes feed
 // - Getting and setting a checkpoint
 // - Getting and setting attachments
-// - Continuous changes feed
 // - No-conflicts mode replication (proposeChanges)
 // - Unsolicited rev request
 // - Connect to public port with authentication
-
-// Make sure it's not possible to have two outstanding subChanges w/ continuous=true.
-func TestConcurrentChangesSubscriptions(t *testing.T) {
-
-
-}
-
-// Start subChanges w/ continuous=true, batchsize=20
-// Make several updates
-// Wait until we get the expected updates
-func TestContinousChangesSubscription(t *testing.T) {
-
-
-}
-
-func TestMultiChannelContinousChangesSubscription(t *testing.T) {
-
-
-}
-
 
 // This test performs the following steps against the Sync Gateway passive blip replicator:
 //
@@ -59,12 +37,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	var rt RestTester
 	defer rt.Close()
 
-	base.EnableLogKey("HTTP")
-	base.EnableLogKey("HTTP+")
-	base.EnableLogKey("BLIP")
-	base.EnableLogKey("BLIP+")
-	base.EnableLogKey("Sync")
-	base.EnableLogKey("Sync+")
+	EnableBlipSyncLogs()
 
 	// Create an admin handler
 	adminHandler := rt.TestAdminHandler()
@@ -93,7 +66,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 	// Verify Sync Gateway will accept the doc revision that is about to be sent
 	var changeList [][]interface{}
 	changesRequest := blip.NewRequest()
-	changesRequest.SetProfile("changes")  // TODO: make a constant for "changes" and use it everywhere
+	changesRequest.SetProfile("changes")                             // TODO: make a constant for "changes" and use it everywhere
 	changesRequest.SetBody([]byte(`[["1", "foo", "1-abc", false]]`)) // [sequence, docID, revID]
 	sent := sender.Send(changesRequest)
 	assert.True(t, sent)
@@ -145,8 +118,10 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 
 	// Call subChanges api and make sure we get expected changes back
 	receviedChangesRequestWg := sync.WaitGroup{}
+
 	// When this test sends subChanges, Sync Gateway will send a changes request that must be handled
 	blipContext.HandlerForProfile["changes"] = func(request *blip.Message) {
+
 		log.Printf("got changes message: %+v", request)
 		body, err := request.Body()
 		log.Printf("changes body: %v, err: %v", string(body), err)
@@ -162,49 +137,46 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 		assert.Equals(t, change[2], "1-abc")              // Rev id of pushed rev
 		receviedChangesRequestWg.Done()
 
-		// TODO: send a reply saying we don't need any changes
-
 	}
+
+	// Send subChanges to subscribe to changes, which will cause the "changes" profile handler above to be called back
 	subChangesRequest := blip.NewRequest()
 	subChangesRequest.SetProfile("subChanges")
 	subChangesRequest.Properties["continuous"] = "true"
-
 	sent = sender.Send(subChangesRequest)
 	assert.True(t, sent)
 	receviedChangesRequestWg.Add(1)
 	subChangesResponse := subChangesRequest.Response()
 	assert.Equals(t, subChangesResponse.SerialNumber(), subChangesRequest.SerialNumber())
 
-	// Wait until we got the expected incoming changes request
+	// Wait until we got the expected callback on the "changes" profile handler
 	receviedChangesRequestWg.Wait()
-
-
-	// changes := getChangesSince() ....
-	
 
 }
 
-// Fails with error since ResponseRecorder does not implment Hijackable interface
-func DisabledTestBlipEndpointResponseRecorder(t *testing.T) {
+// Start subChanges w/ continuous=true, batchsize=20
+// Make several updates
+// Wait until we get the expected updates
+func TestContinousChangesSubscription(t *testing.T) {
 
-	var rt RestTester
-	defer rt.Close()
+}
 
-	// rt.Bucket()
-	serverContext := rt.ServerContext()
-	dbContext := serverContext.Database("db")
-	log.Printf("dbContext: %v", dbContext)
+// Make sure it's not possible to have two outstanding subChanges w/ continuous=true.
+func TestConcurrentChangesSubscriptions(t *testing.T) {
 
-	request, err := http.NewRequest("GET", "http://localhost/db/_blipsync", bytes.NewBufferString(""))
-	request.RequestURI = "db/_blipsync" // This doesn't get filled in by NewRequest
-	FixQuotedSlashes(request)
-	if err != nil {
-		panic(fmt.Sprintf("http.NewRequest failed: %v", err))
-	}
-	response := &TestResponse{httptest.NewRecorder(), request}
-	response.Code = 200 // doesn't seem to be initialized by default; filed Go bug #4188
-	rt.TestPublicHandler().ServeHTTP(response, request)
+}
 
-	response.DumpBody()
+func TestMultiChannelContinousChangesSubscription(t *testing.T) {
+
+}
+
+func EnableBlipSyncLogs() {
+
+	base.EnableLogKey("HTTP")
+	base.EnableLogKey("HTTP+")
+	base.EnableLogKey("BLIP")
+	base.EnableLogKey("BLIP+")
+	base.EnableLogKey("Sync")
+	base.EnableLogKey("Sync+")
 
 }
