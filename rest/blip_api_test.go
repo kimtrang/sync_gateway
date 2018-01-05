@@ -235,15 +235,15 @@ func TestContinousChangesSubscription(t *testing.T) {
 
 }
 
-func TestPushDocsViaChanges(t *testing.T) {
 
-}
 
-// Attempt to repro https://github.com/couchbase/sync_gateway/issues/3144 with following steps
+// Push proposed changes and ensure that the server accepts them
+//
 // 1. Start sync gateway in no-conflicts mode
 // 2. Send changes push request with multiple doc revisions
 // 3. Make sure there are no panics
-func FailingTestMultipleChangesNoConflictsMode(t *testing.T) {
+// 4. Make sure that the server responds to accept the changes (empty array)
+func TestProposedChangesNoConflictsMode(t *testing.T) {
 
 	bt := CreateBlipTester(t, true)
 	defer bt.Close()
@@ -261,11 +261,17 @@ func FailingTestMultipleChangesNoConflictsMode(t *testing.T) {
 	proposeChangesRequest.SetBody([]byte(changesBody))
 	sent := bt.sender.Send(proposeChangesRequest)
 	assert.True(t, sent)
-	changesResponse := proposeChangesRequest.Response()
-	log.Printf("changesResponse: %v", changesResponse)
+	proposeChangesResponse := proposeChangesRequest.Response()
+	body, err := proposeChangesResponse.Body()
+	assertNoError(t, err, "Error getting changes response body")
 
-	// TODO: this test currently panics with https://gist.github.com/tleyden/5ba6e759dc1f99abc48fff8a0160c1c5
+	var changeList [][]interface{}
+	err = json.Unmarshal(body, &changeList)
+	assertNoError(t, err, "Error getting changes response body")
 
+	// The common case of an empty array response tells the sender to send all of the proposed revisions,
+	// so the changeList returned by Sync Gateway is expected to be empty
+	assert.True(t, len(changeList) == 0)
 
 }
 
