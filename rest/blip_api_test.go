@@ -22,9 +22,11 @@ import (
 //   - Send the doc revision in a rev request
 //   - Call changes endpoint and verify that it knows about the revision just sent
 //   - Call subChanges api and make sure we get expected changes back
+//
+// Replication Spec: https://github.com/couchbase/couchbase-lite-core/wiki/Replication-Protocol#proposechanges
 func TestBlipPushRevisionInspectChanges(t *testing.T) {
 
-	bt := CreateBlipTester(t)
+	bt := CreateBlipTester(t, false)
 	defer bt.Close()
 
 	// Verify Sync Gateway will accept the doc revision that is about to be sent
@@ -139,7 +141,7 @@ func TestBlipPushRevisionInspectChanges(t *testing.T) {
 // Wait until we get the expected updates
 func TestContinousChangesSubscription(t *testing.T) {
 
-	bt := CreateBlipTester(t)
+	bt := CreateBlipTester(t, false)
 	defer bt.Close()
 
 	// Counter/Waitgroup to help ensure that all callbacks on continuous changes handler are received
@@ -230,6 +232,40 @@ func TestContinousChangesSubscription(t *testing.T) {
 	}
 
 	receviedChangesWg.Wait()
+
+}
+
+func TestPushDocsViaChanges(t *testing.T) {
+
+}
+
+// Attempt to repro https://github.com/couchbase/sync_gateway/issues/3144 with following steps
+// 1. Start sync gateway in no-conflicts mode
+// 2. Send changes push request with multiple doc revisions
+// 3. Make sure there are no panics
+func FailingTestMultipleChangesNoConflictsMode(t *testing.T) {
+
+	bt := CreateBlipTester(t, true)
+	defer bt.Close()
+
+	proposeChangesRequest := blip.NewRequest()
+	proposeChangesRequest.SetProfile("proposeChanges")
+
+	// According to proposeChanges spec:
+	// proposedChanges entries are of the form: [docID, revID, serverRevID]
+	// where serverRevID is optional
+	changesBody := `
+[["foo", "1-abc"],
+["foo2", "1-abc"]]
+`
+	proposeChangesRequest.SetBody([]byte(changesBody))
+	sent := bt.sender.Send(proposeChangesRequest)
+	assert.True(t, sent)
+	changesResponse := proposeChangesRequest.Response()
+	log.Printf("changesResponse: %v", changesResponse)
+
+	// TODO: this test currently panics with https://gist.github.com/tleyden/5ba6e759dc1f99abc48fff8a0160c1c5
+
 
 }
 
