@@ -396,7 +396,7 @@ func (bh *blipHandler) handleProposedChanges(rq *blip.Message) error {
 		docID := change[0].(string)
 		revID := change[1].(string)
 		parentRevID := ""
-		if len(change) >= 2 {
+		if len(change) > 2 {
 			parentRevID = change[2].(string)
 		}
 		status := bh.db.CheckProposedRev(docID, revID, parentRevID)
