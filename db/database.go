@@ -97,6 +97,7 @@ type DatabaseContextOptions struct {
 	EnableXattr           bool   // Use xattr for _sync
 	LocalDocExpirySecs    uint32 //The _local doc expiry time in seconds
 	SessionCookieName     string // Pass-through DbConfig.SessionCookieName
+	AllowConflicts        *bool  // False forbids creating conflicts
 }
 
 type OidcTestProviderOptions struct {
@@ -112,7 +113,6 @@ type UnsupportedOptions struct {
 	UserViews        UserViewsOptions        `json:"user_views,omitempty"`         // Config settings for user views
 	Replicator2      bool                    `json:"replicator_2,omitempty"`       // Enable new replicator (_blipsync)
 	OidcTestProvider OidcTestProviderOptions `json:"oidc_test_provider,omitempty"` // Config settings for OIDC Provider
-	AllowConflicts   *bool                   `json:"allow_conflicts"`              // False forbids creating conflicts
 }
 
 // Options associated with the import of documents not written by Sync Gateway
@@ -1268,8 +1268,8 @@ func (context *DatabaseContext) FlushRevisionCache() {
 }
 
 func (context *DatabaseContext) AllowConflicts() bool {
-	if context.Options.UnsupportedOptions.AllowConflicts != nil {
-		return *context.Options.UnsupportedOptions.AllowConflicts
+	if context.Options.AllowConflicts != nil {
+		return *context.Options.AllowConflicts
 	}
 	return base.DefaultAllowConflicts
 }
