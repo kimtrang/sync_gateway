@@ -7,9 +7,7 @@
 
   <remote fetch="https://github.com/tleyden/" name="tleyden"/>
 
-  <remote fetch="https://github.com/elastic/" name="elastic"/>
-  <remote fetch="https://github.com/StackExchange/" name="StackExchange"/>
-  <remote fetch="https://github.com/go-ole/" name="go-ole"/>
+  <remote fetch="https://github.com/shirou/" name="shirou"/>
 
   <remote fetch="ssh://git@github.com/couchbaselabs/" name="couchbaselabs_private" />
   
@@ -66,7 +64,7 @@
 
   <project name="gomemcached" path="godeps/src/github.com/couchbase/gomemcached" remote="couchbase" revision="0da75df145308b9a4e6704d762ca9d9b77752efc"/>
 
-  <project name="sg-bucket" path="godeps/src/github.com/couchbase/sg-bucket" remote="couchbase" revision="43c0b3fb76997837f7f72f99f9e0d5363e795ee8"/>
+  <project name="sg-bucket" path="godeps/src/github.com/couchbase/sg-bucket" remote="couchbase" revision="3377ae8c57a8437714106efc16f788f5f190ce73"/>
 
   <project name="go-bindata-assetfs" path="godeps/src/github.com/elazarl/go-bindata-assetfs" remote="couchbasedeps" revision="30f82fa23fd844bd5bb1e5f216db87fd77b5eb43"/>
 
@@ -130,10 +128,12 @@
   <project name="ns_server" path="godeps/src/github.com/couchbase/ns_server" remote="couchbase" revision="6d835931f574f25e3781192c09e45a3ee30deb51"/>
 
   <!-- gosigar -->
-  <project name="gosigar" path="godeps/src/github.com/elastic/gosigar" remote="elastic" revision="f498c67133bcded80f5966ee63acfe68cff4e6bf"/>
-  <project name="wmi" path="godeps/src/github.com/StackExchange/wmi" remote="StackExchange" revision="b12b22c5341f0c26d88c4d66176330500e84db68"/>
-  <project name="go-ole" path="godeps/src/github.com/go-ole/go-ole" remote="go-ole" revision="ae2e2a20879aabdd3a51104ab6a4328af2773948"/>
+  <project name="gosigar" path="godeps/src/github.com/elastic/gosigar" remote="couchbasedeps" revision="f498c67133bcded80f5966ee63acfe68cff4e6bf"/>
+  <project name="wmi" path="godeps/src/github.com/StackExchange/wmi" remote="couchbasedeps" revision="b12b22c5341f0c26d88c4d66176330500e84db68"/>
+  <project name="go-ole" path="godeps/src/github.com/go-ole/go-ole" remote="couchbasedeps" revision="ae2e2a20879aabdd3a51104ab6a4328af2773948"/>
+
+
+  <project name="gopsutil" path="godeps/src/github.com/shirou/gopsutil" remote="shirou" revision="cce2d16538b41615132a07ec08d5bdc91c1851e3"/>
 
 
 </manifest>
-
